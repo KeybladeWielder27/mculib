@@ -74,7 +74,7 @@ static void test_wraparound() {
 static void test_wraparound_partially_filled() {
   // Keep the buffer partially full while the indices run past 255.
   mcu::RingBuffer<uint8_t, 16> rb;
-  uint8_t next_in = 0, next_out = 0, v;
+  uint8_t next_in = 0, next_out = 0, v = 0;
   for (int i = 0; i < 10; ++i) rb.push(next_in++);
   for (int i = 0; i < 100000; ++i) {
     CHECK(rb.push(next_in++));
@@ -140,7 +140,7 @@ static void test_struct_elements() {
   Sample b = {3, -4, 2000};
   CHECK(rb.push(a));
   CHECK(rb.push(b));
-  Sample out;
+  Sample out = {0, 0, 0};
   CHECK(rb.pop(out));
   CHECK(out.x == 1 && out.y == -2 && out.t == 1000);
   CHECK(rb.pop(out));
@@ -153,7 +153,7 @@ static void test_index_types() {
   static_assert(sizeof(mcu::RingBuffer<uint8_t, 256>::index_type) == 2, "");
 
   mcu::RingBuffer<uint8_t, 256> big;
-  uint8_t next_in = 0, next_out = 0, v;
+  uint8_t next_in = 0, next_out = 0, v = 0;
   for (int i = 0; i < 200000; ++i) {
     CHECK(big.push(next_in++));
     CHECK(big.pop(v));

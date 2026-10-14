@@ -25,6 +25,7 @@
 #ifndef MCU_ARDUINO_STREAM_HPP
 #define MCU_ARDUINO_STREAM_HPP
 
+#include "hal/baud.hpp"
 #include "hal/stream.hpp"
 
 namespace mcu {
@@ -32,8 +33,8 @@ namespace mcu {
 template <typename S>
 class ArduinoStream final : public Stream {
  public:
-  explicit ArduinoStream(S& s, bool use_available_for_write = true)
-      : s_(s), limit_writes_(use_available_for_write) {}
+  explicit ArduinoStream(S& serial, bool use_available_for_write = true)
+      : s_(serial), limit_writes_(use_available_for_write) {}
 
   size_t read(uint8_t* dst, size_t max) override {
     size_t n = 0;
@@ -68,6 +69,31 @@ class ArduinoStream final : public Stream {
  private:
   S& s_;
   bool limit_writes_;
+};
+
+// Changes the baud rate of an Arduino serial object with end() then begin().
+// end() waits for queued bytes to finish sending on the usual cores.
+//
+//   mcu::ArduinoBaudControl<HardwareSerial> baud(Serial1);
+//
+// A separate class from ArduinoStream because objects without a baud rate
+// (USB CDC, WiFiClient) have no begin(baud). On ESP32, which needs its pins
+// passed to begin() on some core versions, prefer FunctionBaudControl with a
+// function that calls Serial1.updateBaudRate(b).
+template <typename S>
+class ArduinoBaudControl final : public BaudControl {
+ public:
+  explicit ArduinoBaudControl(S& serial) : s_(serial) {}
+
+  bool set_baud(uint32_t baud) override {
+    if (baud == 0) return false;
+    s_.end();
+    s_.begin((unsigned long)baud);
+    return true;
+  }
+
+ private:
+  S& s_;
 };
 
 }  // namespace mcu

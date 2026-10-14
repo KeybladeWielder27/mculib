@@ -52,7 +52,9 @@ class RingBuffer {
   typedef T value_type;
   typedef IndexT index_type;
 
-  RingBuffer() : head_(0), tail_(0) {}
+  // buf_ is zeroed once so compilers that cannot see through the volatile
+  // indices (GCC 11 at -O2) do not warn about reading uninitialized slots.
+  RingBuffer() : buf_(), head_(0), tail_(0) {}
 
   static constexpr size_t capacity() { return N; }
 

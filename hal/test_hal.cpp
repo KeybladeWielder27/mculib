@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "hal/baud.hpp"
 #include "hal/clock.hpp"
 #include "hal/loopback_stream.hpp"
 #include "hal/ports/arduino_stream.hpp"
@@ -263,6 +264,58 @@ static void test_arduino_port() {
   CHECK(stuck.tx_len == 0);
 }
 
+// ---------------------------------------------------------------------------
+// BaudControl
+// ---------------------------------------------------------------------------
+static uint32_t g_fn_baud = 0;
+static bool fn_baud(uint32_t b) {
+  if (b > 230400) return false;
+  g_fn_baud = b;
+  return true;
+}
+
+// Only begin() and end(): proves ArduinoBaudControl needs nothing else, and
+// that ArduinoStream does not need begin() (FakeSerial above has none).
+struct FakeBaudSerial {
+  unsigned long rate;
+  int ends, begins;
+  bool ended_before_begin;
+  FakeBaudSerial() : rate(9600), ends(0), begins(0), ended_before_begin(true) {}
+  void end() { ++ends; }
+  void begin(unsigned long r) {
+    if (ends <= begins) ended_before_begin = false;
+    ++begins;
+    rate = r;
+  }
+};
+
+static void test_baud() {
+  mcu::FunctionBaudControl f(fn_baud);
+  mcu::BaudControl& bf = f;
+  CHECK(bf.set_baud(115200));
+  CHECK(g_fn_baud == 115200);
+  CHECK(!bf.set_baud(921600));
+  CHECK(g_fn_baud == 115200);
+  mcu::FunctionBaudControl none(0);
+  CHECK(!none.set_baud(9600));
+
+  mcu::ManualBaudControl m(9600, 115200);
+  CHECK(m.baud() == 9600 && m.changes() == 0);
+  CHECK(m.set_baud(57600));
+  CHECK(m.baud() == 57600 && m.changes() == 1);
+  CHECK(!m.set_baud(230400));
+  CHECK(!m.set_baud(0));
+  CHECK(m.baud() == 57600 && m.changes() == 1);
+
+  FakeBaudSerial fs;
+  mcu::ArduinoBaudControl<FakeBaudSerial> a(fs);
+  mcu::BaudControl& ba = a;
+  CHECK(ba.set_baud(38400));
+  CHECK(fs.rate == 38400 && fs.ends == 1 && fs.begins == 1 && fs.ended_before_begin);
+  CHECK(!ba.set_baud(0));
+  CHECK(fs.rate == 38400 && fs.begins == 1);
+}
+
 int main() {
   test_time_helpers();
   test_clocks();
@@ -271,6 +324,7 @@ int main() {
   test_timeout_periodic();
   test_loopback();
   test_arduino_port();
+  test_baud();
 
   printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures ? 1 : 0;

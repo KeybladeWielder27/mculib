@@ -11,7 +11,8 @@ Header-only, C++11, no heap, no exceptions, no RTTI.
 | `stream.hpp` | `mcu::Stream`: non-blocking `read`, `write`, `available`, `write_space` |
 | `clock.hpp` | `mcu::Clock`, `FunctionClock`, `ManualClock`, `Timeout`, wrap-safe time helpers |
 | `loopback_stream.hpp` | `LoopbackStream<RxN, TxN>`: in-memory stream for tests and simulation |
-| `ports/arduino_stream.hpp` | `ArduinoStream<S>`: wraps `Serial`, `Serial1`, `SoftwareSerial`, USB CDC, ... |
+| `baud.hpp` | `mcu::BaudControl` (optional baud-rate changes), `FunctionBaudControl`, `ManualBaudControl` |
+| `ports/arduino_stream.hpp` | `ArduinoStream<S>`: wraps `Serial`, `Serial1`, `SoftwareSerial`, USB CDC, ...; `ArduinoBaudControl<S>` |
 
 ## Stream
 
@@ -49,6 +50,25 @@ mcu::ArduinoStream<HardwareSerial> uart(Serial1);
 By default writes are limited to `availableForWrite()` so they never block. On objects where that
 method just returns 0, construct with `false` (`ArduinoStream<S> s(obj, false)`): writes then pass
 straight through and may block, and `write_space()` reports `kUnboundedSpace`.
+
+## BaudControl
+
+Some devices change their own baud rate on command (an XBee after `ATBD`, a modem after `AT+IPR`), and
+their driver must then retune the host UART. `Stream` has no notion of baud rate, because many streams
+have none, so that ability is a separate interface that a driver takes alongside the stream:
+
+```cpp
+bool set_baud(uint32_t baud);   // false if the rate is not supported
+```
+
+```cpp
+mcu::ArduinoBaudControl<HardwareSerial> baud(Serial1);   // Serial1.end(); Serial1.begin(b);
+
+static bool esp_baud(uint32_t b) { Serial1.updateBaudRate(b); return true; }   // ESP32
+mcu::FunctionBaudControl baud(esp_baud);
+
+mcu::ManualBaudControl baud(9600);       // tests: records the rate instead
+```
 
 ## Clock and Timeout
 
