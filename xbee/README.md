@@ -5,6 +5,9 @@ Two independent pieces for XBee3 radios:
 - **`xbee_config.hpp`**: configure a radio through its AT command mode (transparent mode, `AP=0`).
 - **`xbee_api.hpp`**: the API-mode frame codec (`AP=1` / `AP=2`): build and parse frames, talk to the
   radio in structured frames. See [API mode](#api-mode-xbee_apihpp) below.
+- **`xbee_requests.hpp`**: request/response tracking on top of the codec: AT commands and transmit
+  requests with answers matched by frame id, timeouts, retries and several in flight at once. See
+  [Requests and responses](#requests-and-responses-xbee_requestshpp).
 
 ## Configuring a radio (xbee_config.hpp)
 
@@ -19,6 +22,7 @@ Header-only, C++11, no exceptions, no RTTI. Built on `at/` and `hal/`.
 |---|---|
 | `xbee_config.hpp` | `XBeeConfigurator`: profile apply, single get/set/command, entering command mode, baud detection |
 | `xbee_api.hpp` | API-mode frames: encoder/parser with `AP=2` escaping, typed frame helpers, `XBeeApi` stream wrapper |
+| `xbee_requests.hpp` | `XBeeRequests`: AT / remote AT / transmit requests with matched answers, timeouts, retries, callbacks |
 
 ## Quick start
 
@@ -240,6 +244,87 @@ recovery happens once enough data has arrived.
   status and modem status frames, and for the explicit and 802.15.4 frames (0x11, 0x91, 0x00, 0x01, 0x80, 0x81;
   Digi marks the last four deprecated in favour of 0x10/0x90). Not yet checked against real hardware.
 
+## Requests and responses (xbee_requests.hpp)
+
+`XBeeApi` sends and receives frames; `XBeeRequests` adds what a program usually wants on top: "send this
+AT command and tell me what the radio answered", "send this data and tell me whether it was delivered".
+It owns an `XBeeApi`, never blocks, takes the time as a parameter, and uses no heap.
+
+```cpp
+#include "xbee/xbee_requests.hpp"
+
+mcu::ArduinoStream<HardwareSerial> uart(Serial1);
+mcu::XBeeRequests<4> xb(uart, mcu::XBeeApiMode::kApi2);     // up to 4 requests in flight
+
+mcu::XBeeReqHandle h_id, h_tx;
+
+void setup() {
+  Serial1.begin(115200);
+  h_id = xb.at("ID", 0, 0, millis());                       // query ATID
+  static const uint8_t msg[] = {'h', 'i'};
+  h_tx = xb.tx(0x0013A20041ABCDEFull, msg, 2, millis());    // data to another radio
+}
+
+void loop() {
+  if (xb.poll(millis())) {                                  // call every pass
+    // a frame that is not an answer to a request: received data, modem status, ...
+    if (xb.frame_type() == mcu::xbee_frame::kRxPacket) {
+      mcu::XBeeRxPacket rx = mcu::XBeeRxPacket();
+      if (mcu::xbee_parse_rx(xb.frame(), xb.frame_length(), rx)) { /* rx.data, rx.data_len */ }
+    }
+  }
+  const mcu::XBeeReqInfo* r = xb.info(h_id);                // 0 once released
+  if (r && r->result != mcu::XBeeReqResult::kPending) {
+    uint64_t network_id;
+    if (r->result == mcu::XBeeReqResult::kOk && mcu::xbee_resp_u64(*r, network_id)) { /* ... */ }
+    xb.release(h_id);                                       // frees the slot
+    h_id = 0;
+  }
+}
+```
+
+**Submitting.** `at(cmd, param, len, now)`, `remote_at(dest64, cmd, param, len, now)` and
+`tx(dest64, payload, len, now)` each return a handle, or 0 if nothing was queued (`submit_error()` says
+`kNoSlot`, `kBadArg` or `kTooBig`). The frame is written at once if the serial link has room.
+
+**Results.** `info(handle)` returns the request's `XBeeReqInfo`, or 0 for a handle that was released.
+`result` is `kPending`, `kOk`, `kRadioError` (the radio answered with an error: `status` holds the AT
+status or the transmit delivery status), `kTimeout` or `kSendFailed`. An AT answer's value is in
+`data`/`data_len` (`xbee_resp_u64()` reads a number); a transmit status 0x8B also fills in `tx_retries`,
+`discovery` and `addr16`. A finished request keeps its slot until you `release()` it; releasing a request
+that is still waiting is how you cancel it (a late answer is dropped). Handles carry a generation, so a
+stale handle never reads somebody else's request.
+
+**Callbacks instead of handles.** Set `on_done` (and `ctx`) in an `XBeeReqOptions`, or `auto_release` to
+discard the result; the slot is then freed for you. A callback is called from `poll()` (or from the
+submitting call, if the request ends at once), and may submit new requests.
+
+**Matching.** Each request gets a frame id (1..255, never one that another pending request uses; ids cycle,
+so an id is not reused for a long time). Local AT answers (0x88), remote AT answers (0x97, which must come
+from the radio addressed unless the request was a broadcast) and transmit status (0x89, 0x8B) complete the
+request with that id. Answers that match nothing (late, duplicated, or from a retry that raced the first
+answer) are dropped and counted in `stats().stale`. Everything else, and any frame too malformed to be an
+answer, is returned by `poll()` for you to handle.
+
+**Timeouts and retries.** `XBeeReqOptions::at()` (1 s, two retries), `remote_at()` (4 s, one retry) and
+`tx()` (5 s, no retries) are the defaults; set `timeout_ms` and `retries` to change them. After a timeout
+the frame is sent again with the same frame id; an answer to an earlier attempt that arrives late still
+completes the request. AT commands are safe to repeat, but retrying a transmit request can deliver the data
+twice if only the status was lost, which is why transmit requests default to no retries. If the serial
+output buffer cannot take a frame, it is retried on later polls, in submission order (a small frame never
+overtakes a bigger one), for `send_timeout_ms` (default: the timeout), then ends with `kSendFailed`.
+`want_response = false` sends with frame id 0: the radio sends no answer and the request ends `kOk` once
+the frame is written.
+
+**Notes.**
+
+- `XBeeRequests<Slots, MaxData, MaxOut, MaxFrame>`: slots in flight (default 4), longest AT answer kept
+  (32), longest frame sent (96) and received (128). RAM is about `Slots x (MaxOut + MaxData + 100)` plus the
+  parser (`MaxFrame + 40`): roughly 1.2 KB with the defaults on a 64-bit host, a bit less on a 32-bit MCU.
+- Not interrupt safe; one context at a time. Use `api()` to send frames that are not tracked.
+- Tested against a simulated radio, not yet real hardware. Timeouts for remote AT and transmit depend on
+  your network (route discovery, sleeping nodes); raise them as needed.
+
 ## Test
 
 API codec (from this folder):
@@ -253,6 +338,21 @@ time and in random chunks (by `feed` and `poll`), length limits, bad checksums, 
 API2 resynchronisation, all-or-nothing sending against streams that lie about their space, every builder
 and parser including truncated input, `XBeeApi` frame-id cycling and a simulated request/response
 exchange, and randomized noise and truncation.
+
+Request layer:
+
+```
+g++ -std=c++11 -Wall -Wextra -Werror -I.. test_xbee_requests.cpp -o test_xbee_requests && ./test_xbee_requests
+```
+
+It runs `XBeeRequests` against a simulated radio on a loopback link with virtual time, in both `AP=1` and
+`AP=2`: queries, sets and error statuses; timeout, retry with the same frame id, and a late answer to the
+first attempt; duplicated and stray answers; several requests in flight with answers out of order; frame id
+allocation around a long-lived request; transmit status in both forms; remote AT including answers from
+the wrong radio and broadcasts; unsolicited frames passing through; callbacks and auto-release; a full
+serial output buffer (order kept, send timeout, a retry stuck behind a blocked frame); counter wrap-around;
+line noise; and randomized submissions against a radio that drops, delays, duplicates and misaddresses
+answers, checking each outcome against what the radio actually put on the wire.
 
 Configurator (from this folder):
 

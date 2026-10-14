@@ -18,12 +18,13 @@ ARM, ESP32, RP2040 and a PC.
 |---|---|
 | `ring_buffer/` | Fixed-capacity FIFO, lock-free for one producer plus one consumer (ISR and main loop) |
 | `checksum/` | CRC-8/16/32 (14 presets, optional table speed-up), Fletcher-16/32, Xor8, Sum8, Lrc8 |
-| `hal/` | `Stream`, `Clock`, `Timeout`, `BaudControl`, an in-memory `LoopbackStream`, Arduino port |
+| `hal/` | `Stream`, `Clock`, `Timeout`, `BaudControl`, `Flash`, in-memory `LoopbackStream` and `RamFlash` for tests, Arduino port |
 | `framing/` | COBS and SLIP packet framing with a pluggable CRC/checksum, over any `Stream` |
 | `cli/` | Serial command console: line editor, tokenizer, strict number parsers, command table, help |
 | `sched/` | Cooperative task scheduler (periodic and one-shot), plus Stopwatch, Throttle, Backoff, RetryTimer |
 | `at/` | Non-blocking AT command engine (OK/ERROR, one-line answers, `+++` escape with guard time) and text helpers |
-| `xbee/` | XBee3: configuration over AT command mode (settings profile, change only what differs, verify, save only if changed, baud detection) and the API-mode (`AP=1`/`2`) frame codec with typed frames |
+| `xbee/` | XBee3: configuration over AT command mode (settings profile, change only what differs, verify, save only if changed, baud detection) the API-mode (`AP=1`/`2`) frame codec with typed frames, and a request/response layer (matched answers, timeouts, retries) |
+| `storage/` | Power-fail-safe key/value settings store on raw flash: wear levelling, compaction, writes only when a value changed |
 | `filter/` | Moving average, EMA, median, slew limiter, Schmitt trigger, saturating math, `Q<F>` fixed point, button debounce with click / long-press events |
 
 ## Using it
@@ -38,4 +39,4 @@ Put this folder on your include path (`-I path/to/mculib`) and include headers b
 
 On Arduino or PlatformIO, copy the folders you need into the project's `lib/` or `src/` directory.
 Note that `ring_buffer/` and `checksum/` tests include their own header directly, while `hal/`,
-`framing/`, `cli/`, `sched/`, `filter/`, `at/` and `xbee/` tests use the root include path (`-I..`); each folder's README gives the exact compile line.
+`framing/`, `cli/`, `sched/`, `filter/`, `at/`, `storage/` and `xbee/` tests use the root include path (`-I..`); each folder's README gives the exact compile line.

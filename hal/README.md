@@ -12,6 +12,8 @@ Header-only, C++11, no heap, no exceptions, no RTTI.
 | `clock.hpp` | `mcu::Clock`, `FunctionClock`, `ManualClock`, `Timeout`, wrap-safe time helpers |
 | `loopback_stream.hpp` | `LoopbackStream<RxN, TxN>`: in-memory stream for tests and simulation |
 | `baud.hpp` | `mcu::BaudControl` (optional baud-rate changes), `FunctionBaudControl`, `ManualBaudControl` |
+| `flash.hpp` | `mcu::Flash`: NOR-style flash (sectors, erase, program units, read) for the `storage/` library |
+| `ram_flash.hpp` | `RamFlash<SectorSize, Sectors, Unit>`: simulated flash for PC tests: rule checking, power-cut injection, torn writes and erases, wear counts, bit flips |
 | `ports/arduino_stream.hpp` | `ArduinoStream<S>`: wraps `Serial`, `Serial1`, `SoftwareSerial`, USB CDC, ...; `ArduinoBaudControl<S>` |
 
 ## Stream
